@@ -1,0 +1,21 @@
+{
+  // ******************************************* //
+  // Fixing OpenCV python hints
+  // "extraPaths" do not work, switching to Jedi language server does
+  // // "python.analysis.memory.keepLibraryAst": true,
+  // // "python.defaultInterpreterPath": "/usr/bin/python3",
+  "python.autoComplete.extraPaths": [
+    // not ideal, since the actual opencv is used from the env (conda install opencv), but at least somewhat helps:
+    "S:/src/opencv4_5_5/build/python",
+    "E:/opencv/build/python",
+  ],
+  "python.analysis.extraPaths": [
+    // not ideal, since the actual opencv is used from the env (conda install opencv), but at least somewhat helps:
+    "S:/src/opencv4_5_5/build/python",
+    "E:/opencv/build/python",
+  ],
+  // https://github.com/microsoft/python-language-server/issues/1926#issuecomment-815524693
+  // "python.languageServer": "Jedi",
+  "python.languageServer":"Pylance",
+  "editor.tabSize": 2
+}

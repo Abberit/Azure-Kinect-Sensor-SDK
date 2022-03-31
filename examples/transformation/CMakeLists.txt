@@ -10,4 +10,5 @@ target_link_libraries(transformation_example PRIVATE
     k4a::k4a
     k4a::k4arecord
     libjpeg-turbo::libjpeg-turbo
+    ${OpenCV_LIBS}
     )

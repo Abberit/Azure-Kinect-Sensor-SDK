@@ -1,12 +1,20 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
+#define _CRT_SECURE_NO_WARNINGS
 
 #include <k4a/k4a.h>
+#include <k4a/k4a.hpp>
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
 #include <k4arecord/playback.h>
 #include <string>
+#include <fstream>
 #include "transformation_helpers.h"
 #include "turbojpeg.h"
+#include <opencv2/highgui.hpp>
+#include <iostream>
 
+/*
 static bool point_cloud_color_to_depth(k4a_transformation_t transformation_handle,
                                        const k4a_image_t depth_image,
                                        const k4a_image_t color_image,
@@ -61,6 +69,7 @@ static bool point_cloud_color_to_depth(k4a_transformation_t transformation_handl
 
     return true;
 }
+*/
 
 static bool point_cloud_depth_to_color(k4a_transformation_t transformation_handle,
                                        const k4a_image_t depth_image,
@@ -116,6 +125,113 @@ static bool point_cloud_depth_to_color(k4a_transformation_t transformation_handl
     return true;
 }
 
+long WriteToFile(const char *fileName, void *buffer, size_t bufferSize)
+{
+    printf("Saving file '%s' of the size '%zu'\n", fileName, bufferSize);
+    // std::cout << bufferSize << std::endl;
+    // assert(buffer != NULL);
+
+    std::ofstream hFile;
+    hFile.open(fileName, std::ios::out | std::ios::trunc | std::ios::binary);
+    if (hFile.is_open())
+    {
+        hFile.write((char *)buffer, static_cast<std::streamsize>(bufferSize));
+        hFile.close();
+    }
+    // std::cout << "[Streaming Service] Color frame is stored in " << fileName << std::endl;
+
+    return 0;
+}
+
+uint16_t getDepthInMM(int x, int y, size_t rowSizeInBytes, uint8_t *depthBuffer)
+{
+    uint16_t *depthBufferInMM = (uint16_t *)depthBuffer;
+    size_t rowSizeInUInt16 = rowSizeInBytes / 2;
+    depthBufferInMM += (uint8_t)y * rowSizeInUInt16 + (uint8_t)x;
+
+    return *depthBufferInMM;
+}
+
+void locator(int event, int x, int y, int flags, void *userdata)
+{
+    std::ignore = flags;
+    k4a_image_t transformed_depth_image = *((k4a_image_t *)userdata);
+
+    size_t rowSizeInBytes = k4a_image_get_stride_bytes(transformed_depth_image);
+    uint8_t *depthBuffer = k4a_image_get_buffer(transformed_depth_image);
+
+    uint16_t depthInMM = getDepthInMM(x, y, rowSizeInBytes, depthBuffer);
+
+    if (event == cv::EVENT_MOUSEMOVE)
+    {
+        printf("At (%d, %d) the depth is: %d\n", x, y, depthInMM);
+    }
+}
+
+static bool point_cloud_depth_to_color2(k4a_transformation_t transformation_handle,
+                                       const k4a_image_t depth_image,
+                                       const k4a_image_t color_image,
+                                       std::string output_dir)
+{
+    // transform color image into depth camera geometry
+    int color_image_width_pixels = k4a_image_get_width_pixels(color_image);
+    int color_image_height_pixels = k4a_image_get_height_pixels(color_image);
+    k4a_image_t transformed_depth_image = NULL;
+    cv::Mat cv_image_no_alpha;
+    cv::Mat cv_image_with_alpha;
+    std::string file_name;
+    cv::String windowTitle = "AzureKinectDK";
+
+    bool result = false;
+
+    if (K4A_RESULT_SUCCEEDED != k4a_image_create(K4A_IMAGE_FORMAT_DEPTH16,
+                                                 color_image_width_pixels,
+                                                 color_image_height_pixels,
+                                                 color_image_width_pixels * (int)sizeof(uint16_t),
+                                                 &transformed_depth_image))
+    {
+        printf("Failed to create transformed depth image\n");
+        goto Cleanup;
+    }
+
+    if (K4A_RESULT_SUCCEEDED !=
+        k4a_transformation_depth_image_to_color_camera(transformation_handle, depth_image, transformed_depth_image))
+    {
+        printf("Failed to compute transformed depth image\n");
+        goto Cleanup;
+    }
+
+    cv_image_with_alpha = cv::Mat(color_image_height_pixels,
+                                  color_image_width_pixels,
+                                  CV_8UC4,
+                                  (void *)k4a_image_get_buffer(color_image));
+    cv::cvtColor(cv_image_with_alpha, cv_image_no_alpha, cv::COLOR_BGRA2BGR);
+
+    cv::namedWindow(windowTitle);
+    cv::setMouseCallback(windowTitle, locator, &transformed_depth_image);
+    cv::imshow(windowTitle, cv_image_no_alpha);
+    cv::waitKey(0);
+
+    printf("Saving screenshot to '%s'...\n", output_dir.c_str());
+
+    file_name = output_dir + "/image.720p.bin";
+    WriteToFile(file_name.c_str(), k4a_image_get_buffer(color_image), k4a_image_get_size(color_image));
+
+    file_name = output_dir + "/depth.1024x1024.raw.bin";
+    WriteToFile(file_name.c_str(), k4a_image_get_buffer(depth_image), k4a_image_get_size(depth_image));
+
+    file_name = output_dir + "/depth.720p.bin";
+    WriteToFile(file_name.c_str(),
+                k4a_image_get_buffer(transformed_depth_image),
+                k4a_image_get_size(transformed_depth_image));
+
+    result = true;
+
+Cleanup:
+    k4a_image_release(transformed_depth_image);
+    return result;
+}
+
 static int capture(std::string output_dir, uint8_t deviceId = K4A_DEVICE_DEFAULT)
 {
     int returnCode = 1;
@@ -129,7 +245,7 @@ static int capture(std::string output_dir, uint8_t deviceId = K4A_DEVICE_DEFAULT
     k4a_device_configuration_t config = K4A_DEVICE_CONFIG_INIT_DISABLE_ALL;
     k4a_image_t depth_image = NULL;
     k4a_image_t color_image = NULL;
-    k4a_image_t color_image_downscaled = NULL;
+    //k4a_image_t color_image_downscaled = NULL;
 
     device_count = k4a_device_get_installed_count();
 
@@ -147,8 +263,8 @@ static int capture(std::string output_dir, uint8_t deviceId = K4A_DEVICE_DEFAULT
 
     config.color_format = K4A_IMAGE_FORMAT_COLOR_BGRA32;
     config.color_resolution = K4A_COLOR_RESOLUTION_720P;
-    config.depth_mode = K4A_DEPTH_MODE_NFOV_UNBINNED;
-    config.camera_fps = K4A_FRAMES_PER_SECOND_30;
+    config.depth_mode = K4A_DEPTH_MODE_WFOV_UNBINNED;
+    config.camera_fps = K4A_FRAMES_PER_SECOND_15;
     config.synchronized_images_only = true; // ensures that depth and color images are both available in the capture
 
     k4a_calibration_t calibration;
@@ -196,17 +312,28 @@ static int capture(std::string output_dir, uint8_t deviceId = K4A_DEVICE_DEFAULT
         goto Exit;
     }
 
+    /*
     // Compute color point cloud by warping color image into depth camera geometry
 #ifdef _WIN32
     file_name = output_dir + "\\color_to_depth.ply";
 #else
     file_name = output_dir + "/color_to_depth.ply";
 #endif
+
     if (point_cloud_color_to_depth(transformation, depth_image, color_image, file_name.c_str()) == false)
     {
         goto Exit;
     }
+    */
 
+    // Compute color point cloud by warping depth image into color camera geometry
+    
+    if (point_cloud_depth_to_color2(transformation, depth_image, color_image, output_dir.c_str()) == false)
+    {
+        goto Exit;
+    }
+
+    /*
     // Compute color point cloud by warping depth image into color camera geometry
 #ifdef _WIN32
     file_name = output_dir + "\\depth_to_color.ply";
@@ -217,7 +344,9 @@ static int capture(std::string output_dir, uint8_t deviceId = K4A_DEVICE_DEFAULT
     {
         goto Exit;
     }
+    */
 
+    /*
     // Compute color point cloud by warping depth image into color camera geometry with downscaled color image and
     // downscaled calibration. This example's goal is to show how to configure the calibration and use the
     // transformation API as it is when the user does not need a point cloud from high resolution transformed depth
@@ -253,6 +382,7 @@ static int capture(std::string output_dir, uint8_t deviceId = K4A_DEVICE_DEFAULT
     {
         goto Exit;
     }
+    */
 
     returnCode = 0;
 
@@ -443,9 +573,45 @@ int main(int argc, char **argv)
 {
     int returnCode = 0;
 
+    /*
+    * This is test case of reading depth information from serialized file.
+ 
+    FILE *f = fopen("E:\\camera_output\\sample\\depth.bin", "rb+");
+    if (f)
+    {
+        fseek(f, 0L, SEEK_END);
+        long filesize = ftell(f);          // get file size
+        fseek(f, 0L, SEEK_SET);            // go back to the beginning
+        uint8_t *buffer = new uint8_t[filesize]; // allocate the read buf
+        fread(buffer, 1, filesize, f);
+        fclose(f);
+
+        // Do what you want with file data
+        int x = 0;
+        int y = 0;
+
+        uint16_t depth = getDepthInMM(x, y, 1280 * 2, buffer);
+        printf("Detected depth for (%d, %d): %d\n", x, y, depth);
+
+        delete[] buffer;
+    }
+    */
+
     if (argc < 2)
     {
-        print_usage();
+        char c;
+        bool exit = false;
+        do
+        {
+            returnCode = capture("E:/camera_output");
+            printf("Screenshot is taken. Press ESC to exit, any other key to continue with another screenshot.\n");
+            if (!std::cin.get(c) || c == 27)
+            {
+                exit = true;
+            }
+        } while (!exit);
+        
+        //print_usage();
     }
     else
     {
@@ -489,6 +655,8 @@ int main(int argc, char **argv)
             print_usage();
         }
     }
+
+    cv::destroyAllWindows();
 
     return returnCode;
 }

@@ -72,9 +72,11 @@ inline std::pair<uint16_t, uint16_t> GetDepthModeRange(const k4a_depth_mode_t de
     case K4A_DEPTH_MODE_NFOV_UNBINNED:
         return { (uint16_t)500, (uint16_t)4000 };
     case K4A_DEPTH_MODE_WFOV_2X2BINNED:
-        return { (uint16_t)250, (uint16_t)3000 };
+        //return { (uint16_t)250, (uint16_t)3000 };
+        return { (uint16_t)150, (uint16_t)700 };
     case K4A_DEPTH_MODE_WFOV_UNBINNED:
-        return { (uint16_t)250, (uint16_t)2500 };
+        //return { (uint16_t)250, (uint16_t)2500 };
+        return { (uint16_t)150, (uint16_t)700 };
 
     case K4A_DEPTH_MODE_PASSIVE_IR:
     default:
